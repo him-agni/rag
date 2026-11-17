@@ -1,0 +1,10 @@
+Company Policy Manual
+
+Work From Home Policy
+Our company follows a hybrid work model. Employees must be in the office on Tuesday, Wednesday, and Thursday. Monday and Friday are optional work-from-home days.
+
+Paid Time Off Policy
+Full-time employees get 20 days of paid time off per year. PTO accrues monthly.
+
+Tech Stack Policy
+We use Python for backend development, React for frontend, and React Native for mobile apps.
