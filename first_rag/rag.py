@@ -63,3 +63,44 @@ print("Closest chunk ids:", ids[0])
 print("Distances:", distances[0])
 for i in ids[0]:
     print("->", chunks[i][:60])
+
+# Step 5: Retrieve, Augment, Generate
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+
+tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-small")
+generator = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-small")
+
+
+def retrieve(question, k=2):
+    q_emb = model.encode([question]).astype("float32")
+    distances, ids = index.search(q_emb, k)
+    return [chunks[i] for i in ids[0]]
+
+
+def augment(question, retrieved_chunks):
+    context = "\n\n".join(retrieved_chunks)
+    return (
+        "Answer the question using only the context below.\n\n"
+        f"Context:\n{context}\n\n"
+        f"Question: {question}\n"
+        "Answer:"
+    )
+
+
+def generate(prompt):
+    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
+    output_ids = generator.generate(**inputs, max_new_tokens=50)
+    return tokenizer.decode(output_ids[0], skip_special_tokens=True)
+
+
+def ask(question, k=2):
+    retrieved = retrieve(question, k)
+    prompt = augment(question, retrieved)
+    answer = generate(prompt)
+    print("\nQuestion:", question)
+    print("Retrieved:", [c[:40] for c in retrieved])
+    print("Answer:", answer)
+
+
+ask("What is the dress code?")
+

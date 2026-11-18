@@ -85,5 +85,35 @@ Our file: chunk_size=190, overlap=20 gives 4 chunks, one per section.
 - Other types: libraries (Annoy, hnswlib); lightweight local stores (Chroma, LanceDB); dedicated vector DBs (Qdrant, Weaviate, Milvus, Pinecone); add-ons to existing DBs (pgvector, Elasticsearch/OpenSearch, MongoDB Atlas, Redis). Written from general knowledge; verify features/pricing before choosing.
 - Swapping stores changes the add/search code only; the RAG idea is the same.
 
+## 6. Retrieve, augment, generate (Step 5)
+The three RAG stages, one function each:
+- retrieve(question, k): embed the question with the SAME model, search FAISS, map the returned ids back to text with chunks[i] (FAISS stores only vectors).
+- augment(question, chunks): plain string formatting, no AI. Join the chunks into a context block and build the prompt: instruction ("answer using only the context") + context + question + "Answer:". The "only the context" instruction is what makes the model use your document instead of its own memory.
+- generate(prompt): tokenize -> model.generate() -> decode. flan-t5-small is a seq2seq model (reads the whole prompt, writes an answer).
+  - truncation=True, max_length=512: input beyond 512 tokens is cut off, so question + k chunks must fit. More or bigger chunks = risk of losing the end (the question!).
+  - max_new_tokens=50: caps the length of the answer.
+
+Why AutoTokenizer + AutoModelForSeq2SeqLM instead of pipeline(): the pipeline is a convenience wrapper doing the same tokenize/generate/decode steps. Calling the pieces directly avoids the pipeline-name issue on transformers 5.x and shows what is happening. (We did not test whether the pipeline would have worked.)
+
+Result: Q "How many vacation days do I get?" -> retrieved PTO chunk first, answer "20". Correct.
+
+Reading the result:
+- Always check the "Retrieved" line before judging the answer. Right chunk + wrong answer = generator problem; wrong chunk = chunking/embedding problem.
+- The answer is terse ("20", no unit). flan-t5-small was trained to give short answers. Idea to try (untested): change the prompt to ask for a full sentence, or use a bigger model.
+- A small model may also make up an answer for questions the document does not cover. That is a generator limit, not a retrieval bug.
+
+### Out-of-scope questions (the dress-code test)
+- RAG does not know what the document lacks. Retrieval always returns the k nearest chunks, even when none are relevant (distance is relative, there is no built-in "no match"). The generator then sees irrelevant context.
+- Result: "What is the dress code?" -> answer "a hybrid work model". Wrong, and it sounds plausible. This is the RAG version of a hallucination: the model grabs something from the context that is not an answer.
+- The retrieval stage cannot tell you "nothing relevant exists" unless you add a check. The generator will not reliably refuse on its own, especially a small model.
+- Common defences (not yet tried here):
+  1. Similarity threshold: if the best score is below a cutoff, skip generation and reply "I don't know". Pick the cutoff by looking at scores for answerable vs unanswerable questions.
+  2. Prompt instruction: "If the context does not contain the answer, say you don't know." Helps larger models more than small ones.
+  3. A bigger/better generator.
+  4. Answer checking: a second step verifies the answer is supported by the context.
+- Also seen: "What programming language do we use?" -> "Python" is correct but incomplete; the context also lists React and React Native. Small models often answer with only the first item. A question worded in the plural, or a prompt asking for all of them, may help (untested).
+- Lesson: judging a RAG system needs unanswerable questions in the test set, not only answerable ones.
+
 ## Next
-Step 5: retrieve -> augment (prompt template) -> generate with flan-t5-small. Possible issue: transformers 5.x may not support the "text2text-generation" pipeline name.
+- Fix and re-test the dress-code case (threshold and/or prompt) and the chunk_size=150 case.
+- Hit-rate test: questions with known answers across chunk sizes, count how often the right chunk is in the top k.
