@@ -69,18 +69,20 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
 tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-small")
 generator = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-small")
+MAX_DISTANCE = 1.4
 
 
 def retrieve(question, k=2):
     q_emb = model.encode([question]).astype("float32")
     distances, ids = index.search(q_emb, k)
-    return [chunks[i] for i in ids[0]]
+    return [chunks[i] for i in ids[0]], distances[0]
 
 
 def augment(question, retrieved_chunks):
     context = "\n\n".join(retrieved_chunks)
     return (
-        "Answer the question using only the context below.\n\n"
+        "Answer the question using only the context below. "
+        "If the answer is not in the context, reply exactly: I don't know.\n\n"
         f"Context:\n{context}\n\n"
         f"Question: {question}\n"
         "Answer:"
@@ -94,13 +96,19 @@ def generate(prompt):
 
 
 def ask(question, k=2):
-    retrieved = retrieve(question, k)
-    prompt = augment(question, retrieved)
-    answer = generate(prompt)
+    retrieved, distances = retrieve(question, k)
     print("\nQuestion:", question)
-    print("Retrieved:", [c[:40] for c in retrieved])
-    print("Answer:", answer)
+    print("Distances:", [round(float(d), 3) for d in distances])
+
+    # Threshold: keep only chunks close enough to the question
+    relevant = [c for c, d in zip(retrieved, distances) if d <= MAX_DISTANCE]
+    if not relevant:
+        print("Answer: I don't know (no relevant chunk found)")
+        return
+
+    print("Retrieved:", [c[:40] for c in relevant])
+    print("Answer:", generate(augment(question, relevant)))
 
 
-ask("What is the dress code?")
+ask("Is there free lunch?")
 

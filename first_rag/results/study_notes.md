@@ -114,6 +114,20 @@ Reading the result:
 - Also seen: "What programming language do we use?" -> "Python" is correct but incomplete; the context also lists React and React Native. Small models often answer with only the first item. A question worded in the plural, or a prompt asking for all of them, may help (untested).
 - Lesson: judging a RAG system needs unanswerable questions in the test set, not only answerable ones.
 
+### Calibrating the threshold (Step 6)
+- A distance threshold has no universal value. It depends on the embedding model, the data and the metric (here, L2 distance, smaller = closer). You find it by measuring.
+- Method: first run with the threshold effectively off (99) and print distances. Collect the best distance for answerable questions and for unanswerable ones. Put the threshold in the gap between them.
+- Our numbers: answerable best distances 0.783 to 1.221; dress code (unanswerable) 1.553. Candidate threshold 1.4.
+- The threshold works on retrieval, BEFORE the generator, so it does not depend on the model behaving. The prompt instruction ("say I don't know") depends on the model obeying, and flan-t5-small did not: dress code still got "a hybrid work model". Rule of thumb: enforce limits in code, use the prompt only as a hint.
+- Limits: with few questions the threshold can be overfit. Questions that share words with the document may still land close. More test questions (answerable and unanswerable) give a safer value. Embedding distance measures topic similarity, not whether the chunk actually contains the answer.
+
+### Threshold result (1.4)
+- Dress code, "CEO's name" and "free lunch" (all not in the document) were all blocked with "I don't know". Best distances 1.504 to 1.553, all above 1.4.
+- Takeaway: a distance threshold in code fixed what a prompt instruction could not. Unrelated topics sit far from every chunk in embedding space, so a cutoff catches them.
+- Where it will likely fail: an unanswerable question on a topic the document covers, e.g. "How many sick days do I get?" is close in meaning to the PTO chunk, so its distance may fall under 1.4 and the generator would answer from the PTO chunk. A threshold measures topic closeness, not whether the answer is actually present.
+- Final pipeline so far: question -> embed -> FAISS top-k (with distances) -> drop chunks over the threshold -> if none left, answer "I don't know" (no model call) -> else build prompt -> flan-t5-small generates. The guard sits between retrieval and generation, which is why it works even though the model ignores the prompt hint.
+- Margin matters: 0.10 on the unanswerable side is thin. Re-check the threshold whenever the document, chunk size or embedding model changes.
+
 ## Next
-- Fix and re-test the dress-code case (threshold and/or prompt) and the chunk_size=150 case.
+- Re-run the answerable questions at 1.4, test a tricky same-topic unanswerable question, and the chunk_size=150 case.
 - Hit-rate test: questions with known answers across chunk sizes, count how often the right chunk is in the top k.

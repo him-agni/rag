@@ -76,7 +76,47 @@ Findings:
 - The second retrieved chunk is often filler ('Company Policy Manual'), because k=2 but only one chunk is relevant. This is harmless when the first chunk is right.
 - Ideas to fix the dress-code case (NOT tried yet): a similarity threshold so low-scoring chunks are dropped and the system says "I don't know" without calling the model; a prompt line like "If the answer is not in the context, say I don't know"; a bigger generator.
 
+## Step 6 - Threshold + prompt fix, calibration run (done)
+- Changed retrieve() to also return FAISS distances, added an "If the answer is not in the context, reply exactly: I don't know." line to the prompt, and made ask() drop chunks with distance > MAX_DISTANCE (if none are left, print "I don't know" without calling the model).
+- This run used MAX_DISTANCE = 99 (nothing blocked) to measure distances.
+
+| Question | Distances (best, 2nd) | Answer |
+|---|---|---|
+| How many vacation days do I get? | 1.221, 1.333 | 20 |
+| Which days must I be in office? | 0.925, 1.553 | Tuesday, Wednesday, and Thursday |
+| What programming language do we use? | 1.178, 1.749 | Python |
+| Does PTO accrue monthly? | 0.783, 1.475 | yes |
+| What is the dress code? | 1.553, 1.711 | a hybrid work model (still wrong) |
+
+Screenshots: screenshots/step6_calib_*.png (vacation, office_days, programming_language, pto_monthly, dress_code)
+
+Findings:
+- The new prompt line did NOT change the dress-code answer: flan-t5-small ignored the "I don't know" instruction. The prompt fix is not reliable on this model.
+- The threshold was not active in this run (99), so the dress-code result is expected.
+- Distances separate the cases: best distance for answerable questions is 0.783 to 1.221 (worst = vacation, 1.221). Dress code (unanswerable) is 1.553. Gap = 1.221 to 1.553.
+- Candidate threshold: MAX_DISTANCE = 1.4 (between the two). Paper check: keeps both vacation chunks (1.221, 1.333), keeps the best chunk for office/language/PTO and drops their filler second chunks (1.553, 1.749, 1.475), and drops both dress-code chunks (1.553, 1.711) -> "I don't know". NOT run yet.
+- Caveat: only 4 answerable questions and 1 unanswerable, so 1.4 is tuned to these. Other out-of-scope questions could land below it.
+
+## Step 6 - Threshold MAX_DISTANCE = 1.4 (unanswerable questions: works)
+
+| Question | Distances (best, 2nd) | Answer |
+|---|---|---|
+| What is the dress code? | 1.553, 1.711 | I don't know (no relevant chunk found) |
+| What is the CEO's name? | 1.504, 1.812 | I don't know (no relevant chunk found) |
+| Is there free lunch? | 1.514, 1.712 | I don't know (no relevant chunk found) |
+
+Screenshots: screenshots/step6_threshold1.4_dress_code.png, step6_threshold1.4_ceo_name.png, step6_threshold1.4_free_lunch.png
+
+Findings:
+- The dress-code question is fixed: it now gets "I don't know" instead of "a hybrid work model". The model is not called at all when no chunk passes the threshold.
+- Two new unanswerable questions (CEO, free lunch) were also blocked. All three unanswerable best distances (1.504 to 1.553) are above 1.4.
+- Margins at 1.4: answerable worst 1.221 is 0.18 below the threshold; unanswerable closest 1.504 is 0.10 above it. The upper side is the thinner one.
+- Not yet re-run with the threshold on: the four answerable questions. By the calibration distances they should still pass, but that is unconfirmed.
+- Code state: rag.py now holds the full pipeline (load -> chunk at 190/20 -> embed -> FAISS -> retrieve with distances -> threshold MAX_DISTANCE = 1.4 -> augment -> generate). The file ends with a single `ask("Is there free lunch?")` call. Committed and pushed to GitHub with this step.
+
 ## Next
-- Try fixing the dress-code case (prompt change and/or similarity threshold) and re-run all four questions.
+- Re-run the four answerable questions with MAX_DISTANCE = 1.4 and confirm the answers are unchanged.
+- Try a trickier unanswerable question that shares words with the document (e.g. "How many sick days do I get?") to test the edge of the threshold.
+- Re-run the vacation question at chunk_size=150 and compare.
 - Re-run the vacation question at chunk_size=150 and compare the answer.
 - Small hit-rate test across chunk sizes
